@@ -5,7 +5,8 @@
   "author": {
     "name": "Memo Cook"
   },
-  "repository": "https://github.com/local/memo-cook",
+  "homepage": "https://github.com/ken0122/memo-cook",
+  "repository": "https://github.com/ken0122/memo-cook",
   "license": "MIT",
   "skills": "./skills/",
   "mcpServers": "./.mcp.json"

@@ -1,8 +1,8 @@
 {
   "mcpServers": {
     "memo-cook": {
-      "command": "/opt/homebrew/bin/memo-cook",
-      "args": ["mcp"]
+      "command": "npx",
+      "args": ["-y", "memo-cook@latest", "mcp"]
     }
   }
 }

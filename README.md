@@ -51,7 +51,24 @@ memo-cook inbox
 memo-cook organize <id> --project memo-cook --tags architecture,agent --status active
 memo-cook link <from_id> <to_id> --relation supports
 memo-cook reindex
+memo-cook doctor
 ```
+
+## Search
+
+Memo Cook uses hybrid lexical retrieval in v1.1:
+
+- SQLite FTS5 for normal word-based search.
+- A rebuildable gram index for Chinese text, short exact fragments, code symbols, URL pieces, tags, and project names.
+- Fused ranking with optional `match_reasons` so agents can explain whether a result matched by title, tag, project, content, FTS, or gram recall.
+
+No embedding or external model dependency is used in v1.1.
+
+## URL Safety
+
+URL capture stores readable `text/html`, `text/plain`, `text/markdown`, and `application/xhtml+xml` responses up to 2 MB. Other content types, oversized responses, failed fetches, and blocked private URLs are saved as failure link cards instead of crashing the capture.
+
+By default Memo Cook blocks localhost, private, and link-local URLs to protect the agent runtime environment. Set `MEMO_COOK_ALLOW_PRIVATE_URLS=1` only when you intentionally want to capture from local or private network resources.
 
 ## MCP
 
@@ -137,5 +154,10 @@ Run checks:
 ```bash
 npm run typecheck
 npm test
+npm run eval
 npm run build
 ```
+
+## License
+
+Memo Cook is released under the MIT License. See [LICENSE](LICENSE).

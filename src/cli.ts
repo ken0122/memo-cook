@@ -4,6 +4,7 @@ import { fileURLToPath } from "node:url";
 import { Command } from "commander";
 import { MemoCook } from "./service.js";
 import { runMcpServer } from "./mcp.js";
+import { runDoctor } from "./doctor.js";
 import type { CaptureInput, MemoryScope, NoteStatus } from "./types.js";
 import { normalizeTags } from "./utils.js";
 
@@ -148,6 +149,14 @@ export async function main(argv = process.argv): Promise<void> {
       const root = service(program.opts<{ home?: string }>().home);
       json(await root.rebuildIndex());
       root.close();
+    });
+
+  program
+    .command("doctor")
+    .description("run read-only diagnostics for the Memo Cook store and plugin commands")
+    .action(async () => {
+      const opts = program.opts<{ home?: string }>();
+      json(await runDoctor({ home: opts.home }));
     });
 
   await program.parseAsync(argv);

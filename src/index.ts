@@ -1,5 +1,6 @@
 export { MemoCook } from "./service.js";
 export { createMcpServer, runMcpServer } from "./mcp.js";
+export { runDoctor } from "./doctor.js";
 export type {
   CaptureInput,
   LinkInput,

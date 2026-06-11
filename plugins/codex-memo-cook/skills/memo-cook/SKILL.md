@@ -15,6 +15,7 @@ Memo Cook is the user's shared memory outboard for Codex and other agents. It st
 - When returning search results, include the note `id`, title, scope/project, tags, source URL or attachment reference, and the relevant snippet.
 - If Memo Cook results conflict with Codex built-in memory, current thread context, or another retrieved Memo Cook note, state the conflict with note ids/paths when available and ask the user which source to follow. Do not silently merge or choose between conflicting memories.
 - Treat Markdown as the source of truth. If search looks stale, run the CLI `memo-cook reindex` only after the user asks for repair or maintenance.
+- Use the CLI `memo-cook doctor` for read-only maintenance diagnostics when the user asks to inspect or repair Memo Cook setup.
 
 ## Capture Guidance
 

@@ -22,6 +22,15 @@ type NoteRow = {
   content: string;
   snippet?: string;
   rank?: number;
+  gram_score?: number;
+};
+
+type SearchSource = "fts" | "gram" | "like";
+
+type RankedResult = {
+  result: NoteSearchResult;
+  score: number;
+  reasons: Set<string>;
 };
 
 function parseJsonArray(value: string | null | undefined): string[] {
@@ -50,7 +59,7 @@ function parseLinks(value: string | null | undefined): MemoLink[] {
   }
 }
 
-function toSearchResult(row: NoteRow): NoteSearchResult {
+function toSearchResult(row: NoteRow, matchReasons: string[] = []): NoteSearchResult {
   return {
     id: row.id,
     title: row.title,
@@ -66,7 +75,8 @@ function toSearchResult(row: NoteRow): NoteSearchResult {
     created_at: row.created_at,
     updated_at: row.updated_at,
     snippet: row.snippet || trimForSnippet(row.content),
-    score: row.rank
+    score: row.rank ?? row.gram_score,
+    match_reasons: matchReasons.length ? [...new Set(matchReasons)].sort() : undefined
   };
 }
 
@@ -78,12 +88,116 @@ function tokenizeFts(input: string): string | undefined {
   return tokens.map((token) => `"${token.replaceAll('"', '""')}"*`).join(" AND ");
 }
 
+function normalizeSearchText(input: string): string {
+  return input.normalize("NFKC").toLowerCase();
+}
+
+function tokenizeQueryParts(input: string): string[] {
+  return [...new Set(input.match(/[\p{Letter}\p{Number}_./:-]+/gu)?.map(normalizeSearchText) ?? [])].filter(Boolean);
+}
+
+function gramsForValue(input: string): string[] {
+  const normalized = normalizeSearchText(input);
+  const grams = new Set<string>();
+  const parts = normalized.match(/[\p{Script=Han}]+|[a-z0-9_./:-]+/gu) ?? [];
+
+  for (const part of parts) {
+    if (/^\p{Script=Han}+$/u.test(part)) {
+      for (const char of part) {
+        grams.add(char);
+      }
+      for (let index = 0; index < part.length - 1; index += 1) {
+        grams.add(part.slice(index, index + 2));
+      }
+      if (part.length <= 12) {
+        grams.add(part);
+      }
+      continue;
+    }
+
+    grams.add(part);
+    for (const split of part.split(/[./:-]+/).filter(Boolean)) {
+      grams.add(split);
+    }
+  }
+
+  return [...grams].filter((gram) => gram.length > 0 && gram.length <= 80);
+}
+
+function gramsForQuery(input: string): string[] {
+  return gramsForValue(input);
+}
+
 function matchesTags(row: NoteSearchResult, requiredTags?: string[]): boolean {
   if (!requiredTags?.length) {
     return true;
   }
   const rowTags = new Set(row.tags);
   return requiredTags.every((tag) => rowTags.has(tag));
+}
+
+function lexicalReasons(row: NoteSearchResult, query: string, source: SearchSource): string[] {
+  const reasons = new Set<string>([source]);
+  const parts = tokenizeQueryParts(query);
+  const title = normalizeSearchText(row.title);
+  const content = normalizeSearchText(row.snippet);
+  const project = normalizeSearchText(row.project ?? "");
+  const tags = row.tags.map(normalizeSearchText);
+
+  for (const part of parts) {
+    if (title.includes(part)) {
+      reasons.add("title");
+    }
+    if (content.includes(part)) {
+      reasons.add("content");
+    }
+    if (project && project.includes(part)) {
+      reasons.add("project");
+    }
+    if (tags.some((tag) => tag.includes(part))) {
+      reasons.add("tag");
+    }
+  }
+
+  return [...reasons];
+}
+
+function reasonBoost(reasons: Set<string>): number {
+  let boost = 0;
+  if (reasons.has("title")) {
+    boost += 0.08;
+  }
+  if (reasons.has("tag")) {
+    boost += 0.06;
+  }
+  if (reasons.has("project")) {
+    boost += 0.04;
+  }
+  return boost;
+}
+
+function addRanked(
+  combined: Map<string, RankedResult>,
+  rows: NoteSearchResult[],
+  source: SearchSource,
+  query: string,
+  weight = 1
+): void {
+  rows.forEach((row, index) => {
+    const existing =
+      combined.get(row.id) ??
+      ({
+        result: row,
+        score: 0,
+        reasons: new Set<string>()
+      } satisfies RankedResult);
+    for (const reason of lexicalReasons(row, query, source)) {
+      existing.reasons.add(reason);
+    }
+    existing.score += weight / (60 + index + 1);
+    existing.score += reasonBoost(existing.reasons);
+    combined.set(row.id, existing);
+  });
 }
 
 export class MemoIndex {
@@ -134,6 +248,13 @@ export class MemoIndex {
         scope,
         tokenize = 'unicode61'
       );
+      CREATE TABLE IF NOT EXISTS note_grams (
+        note_id TEXT NOT NULL,
+        gram TEXT NOT NULL,
+        field TEXT NOT NULL,
+        PRIMARY KEY (note_id, gram, field)
+      );
+      CREATE INDEX IF NOT EXISTS idx_note_grams_gram ON note_grams(gram);
     `);
   }
 
@@ -167,6 +288,21 @@ export class MemoIndex {
       this.db
         .prepare("INSERT INTO notes_fts (id, title, content, tags, project, scope) VALUES (?, ?, ?, ?, ?, ?)")
         .run(note.id, note.title, note.content, note.tags.join(" "), note.project ?? "", note.scope);
+      this.db.prepare("DELETE FROM note_grams WHERE note_id = ?").run(note.id);
+      const gramInsert = this.db.prepare("INSERT OR IGNORE INTO note_grams (note_id, gram, field) VALUES (?, ?, ?)");
+      const fields = [
+        ["title", note.title],
+        ["content", note.content],
+        ["tags", note.tags.join(" ")],
+        ["project", note.project ?? ""],
+        ["source_url", note.source_url ?? ""],
+        ["attachments", note.attachments.join(" ")]
+      ] as const;
+      for (const [field, value] of fields) {
+        for (const gram of gramsForValue(value)) {
+          gramInsert.run(note.id, gram, field);
+        }
+      }
       this.db.prepare("DELETE FROM links WHERE from_id = ?").run(note.id);
       for (const link of note.links) {
         this.db
@@ -185,6 +321,7 @@ export class MemoIndex {
     try {
       this.db.prepare("DELETE FROM notes WHERE id = ?").run(id);
       this.db.prepare("DELETE FROM notes_fts WHERE id = ?").run(id);
+      this.db.prepare("DELETE FROM note_grams WHERE note_id = ?").run(id);
       this.db.prepare("DELETE FROM links WHERE from_id = ? OR to_id = ?").run(id, id);
       this.db.exec("COMMIT");
     } catch (error) {
@@ -203,18 +340,40 @@ export class MemoIndex {
     const requiredTags = input.tags ?? [];
     const candidates = Math.max(limit * 5, 25);
     const fts = tokenizeFts(input.query);
+    const combined = new Map<string, RankedResult>();
 
     if (fts) {
       try {
-        const rows = this.searchFts(fts, input, candidates);
-        const filtered = rows.map(toSearchResult).filter((row) => matchesTags(row, requiredTags));
-        return filtered.slice(0, limit);
+        const rows = this.searchFts(fts, input, candidates).map((row) => toSearchResult(row));
+        addRanked(combined, rows.filter((row) => matchesTags(row, requiredTags)), "fts", input.query, 1);
       } catch {
-        return this.searchLike(input, candidates).filter((row) => matchesTags(row, requiredTags)).slice(0, limit);
+        // FTS queries can reject unusual punctuation. Gram and LIKE search still provide lexical recall.
       }
     }
 
-    return this.searchLike(input, candidates).filter((row) => matchesTags(row, requiredTags)).slice(0, limit);
+    addRanked(
+      combined,
+      this.searchGram(input, candidates).filter((row) => matchesTags(row, requiredTags)),
+      "gram",
+      input.query,
+      0.95
+    );
+    addRanked(
+      combined,
+      this.searchLike(input, candidates).filter((row) => matchesTags(row, requiredTags)),
+      "like",
+      input.query,
+      0.7
+    );
+
+    return [...combined.values()]
+      .map(({ result, score, reasons }) => ({
+        ...result,
+        score,
+        match_reasons: [...reasons].sort()
+      }))
+      .sort((a, b) => (b.score ?? 0) - (a.score ?? 0) || b.updated_at.localeCompare(a.updated_at))
+      .slice(0, limit);
   }
 
   listInbox(input: { project?: string; limit?: number } = {}): NoteSearchResult[] {
@@ -235,7 +394,7 @@ export class MemoIndex {
          LIMIT ?`
       )
       .all(...params) as NoteRow[];
-    return rows.map(toSearchResult);
+    return rows.map((row) => toSearchResult(row));
   }
 
   async rebuild(notesRoot: string): Promise<number> {
@@ -244,6 +403,7 @@ export class MemoIndex {
       this.db.prepare("DELETE FROM links").run();
       this.db.prepare("DELETE FROM notes").run();
       this.db.prepare("DELETE FROM notes_fts").run();
+      this.db.prepare("DELETE FROM note_grams").run();
       this.db.exec("COMMIT");
     } catch (error) {
       this.db.exec("ROLLBACK");
@@ -286,9 +446,16 @@ export class MemoIndex {
   }
 
   private searchLike(input: SearchInput, limit: number): NoteSearchResult[] {
-    const like = `%${input.query}%`;
-    const where = ["(title LIKE ? OR content LIKE ? OR tags LIKE ?)"];
-    const params: Array<string | number> = [like, like, like];
+    const parts = tokenizeQueryParts(input.query);
+    const likeParts = parts.length ? parts : [input.query];
+    const where = [
+      `(${likeParts.map(() => "(title LIKE ? OR content LIKE ? OR tags LIKE ? OR project LIKE ? OR source_url LIKE ?)").join(" OR ")})`
+    ];
+    const params: Array<string | number> = [];
+    for (const part of likeParts) {
+      const like = `%${part}%`;
+      params.push(like, like, like, like, like);
+    }
     if (input.scope) {
       where.push("scope = ?");
       params.push(input.scope);
@@ -308,6 +475,48 @@ export class MemoIndex {
          LIMIT ?`
       )
       .all(...params) as NoteRow[];
-    return rows.map(toSearchResult);
+    return rows.map((row) => toSearchResult(row));
+  }
+
+  private searchGram(input: SearchInput, limit: number): NoteSearchResult[] {
+    const grams = gramsForQuery(input.query);
+    if (!grams.length) {
+      return [];
+    }
+    const placeholders = grams.map(() => "?").join(", ");
+    const where = [`g.gram IN (${placeholders})`];
+    const params: Array<string | number> = [...grams];
+    if (input.scope) {
+      where.push("n.scope = ?");
+      params.push(input.scope);
+    }
+    if (input.project) {
+      where.push("n.project = ?");
+      params.push(input.project);
+    }
+    params.push(limit);
+
+    const rows = this.db
+      .prepare(
+        `SELECT n.*, substr(n.content, 1, 240) AS snippet,
+          SUM(
+            CASE g.field
+              WHEN 'title' THEN 6
+              WHEN 'tags' THEN 5
+              WHEN 'project' THEN 4
+              WHEN 'source_url' THEN 3
+              WHEN 'attachments' THEN 2
+              ELSE 1
+            END
+          ) AS gram_score
+         FROM note_grams g
+         JOIN notes n ON n.id = g.note_id
+         WHERE ${where.join(" AND ")}
+         GROUP BY n.id
+         ORDER BY gram_score DESC, n.updated_at DESC
+         LIMIT ?`
+      )
+      .all(...params) as NoteRow[];
+    return rows.map((row) => toSearchResult(row));
   }
 }

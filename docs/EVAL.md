@@ -4,6 +4,12 @@
 
 Memo Cook succeeds when an agent can save a useful memory explicitly, retrieve it later in the right context, and show where it came from.
 
+Run the executable golden retrieval check:
+
+```bash
+npm run eval
+```
+
 ## Golden Retrieval
 
 Use a fixed fixture set containing:
@@ -17,6 +23,7 @@ Use a fixed fixture set containing:
 Expected behavior:
 
 - Clear queries return the correct note in Top 3.
+- Chinese and exact-fragment queries return the correct note in Top 3.
 - Project-filtered queries do not return unrelated project notes.
 - Tag-filtered queries require all requested tags.
 - Ambiguous queries return traceable candidates rather than pretending certainty.
@@ -34,6 +41,7 @@ Every `memo_search` result must include:
 - `source_type`
 - `source_url` or `attachments`
 - `snippet`
+- optional `match_reasons`
 
 Every `memo_read` result must include the full Markdown content and the same traceability fields.
 
@@ -72,6 +80,7 @@ URL:
 
 - Save original/final URL, metadata, and extracted text when fetch succeeds.
 - Save a link card and failure reason when fetch fails.
+- Save a failure card when the URL is private by default, too large, or has an unsupported content type.
 
 Image:
 

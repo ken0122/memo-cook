@@ -1,3 +1,4 @@
+import { createServer } from "node:http";
 import { mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -6,6 +7,7 @@ import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { afterEach, describe, expect, it } from "vitest";
 import { createMcpServer } from "../src/mcp.js";
 import { MemoCook } from "../src/service.js";
+import { runDoctor } from "../src/doctor.js";
 
 const homes: string[] = [];
 
@@ -18,6 +20,19 @@ async function makeHome(): Promise<string> {
 async function markdownFiles(home: string): Promise<string[]> {
   const { findMarkdownFiles } = await import("../src/markdown.js");
   return findMarkdownFiles(join(home, "notes"));
+}
+
+async function withServer(handler: Parameters<typeof createServer>[0]): Promise<{ url: string; close: () => Promise<void> }> {
+  const server = createServer(handler);
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const address = server.address();
+  if (!address || typeof address === "string") {
+    throw new Error("Could not start test server");
+  }
+  return {
+    url: `http://127.0.0.1:${address.port}`,
+    close: () => new Promise((resolve, reject) => server.close((error) => (error ? reject(error) : resolve())))
+  };
 }
 
 afterEach(async () => {
@@ -60,6 +75,46 @@ describe("MemoCook", () => {
       source_type: "text",
       snippet: expect.any(String)
     });
+    memo.close();
+  });
+
+  it("uses gram search for Chinese and exact lexical fragments", async () => {
+    const home = await makeHome();
+    const memo = new MemoCook({ home });
+    const saved = await memo.capture({
+      text: "我喜欢在项目分析里先给结论，再给具体证据。",
+      title: "回复偏好",
+      tags: ["偏好", "中文"],
+      project: "memo-cook"
+    });
+
+    const results = memo.search({ query: "项目分析 结论", project: "memo-cook", limit: 3 });
+
+    expect(results[0]?.id).toBe(saved.id);
+    expect(results[0]?.match_reasons).toEqual(expect.arrayContaining(["gram", "content"]));
+    memo.close();
+  });
+
+  it("keeps tag filters strict while ranking title and tag matches", async () => {
+    const home = await makeHome();
+    const memo = new MemoCook({ home });
+    const titleMatch = await memo.capture({
+      text: "The body mentions a general preference.",
+      title: "Agent retrieval preference",
+      tags: ["policy"],
+      project: "memo-cook"
+    });
+    await memo.capture({
+      text: "Agent retrieval preference appears only in this unrelated body.",
+      title: "Body-only fixture",
+      tags: ["misc"],
+      project: "memo-cook"
+    });
+
+    const results = memo.search({ query: "retrieval preference", tags: ["policy"], project: "memo-cook", limit: 5 });
+
+    expect(results.map((item) => item.id)).toEqual([titleMatch.id]);
+    expect(results[0]?.match_reasons).toEqual(expect.arrayContaining(["title"]));
     memo.close();
   });
 
@@ -125,6 +180,50 @@ describe("MemoCook", () => {
     memo.close();
   });
 
+  it("blocks private URL capture by default and stores the failure reason", async () => {
+    const home = await makeHome();
+    const memo = new MemoCook({ home });
+
+    const saved = await memo.capture({ url: "http://127.0.0.1:9/private", title: "Private URL" });
+    const note = await memo.read(saved.id);
+
+    expect(note.content).toContain("Capture failed");
+    expect(note.content).toContain("Private URL blocked");
+    memo.close();
+  });
+
+  it("rejects unsupported and oversized URL responses as failure cards", async () => {
+    const previous = process.env.MEMO_COOK_ALLOW_PRIVATE_URLS;
+    process.env.MEMO_COOK_ALLOW_PRIVATE_URLS = "1";
+    const unsupported = await withServer((_req, res) => {
+      res.writeHead(200, { "content-type": "application/octet-stream" });
+      res.end("binary");
+    });
+    const oversized = await withServer((_req, res) => {
+      res.writeHead(200, { "content-type": "text/plain", "content-length": String(2 * 1024 * 1024 + 1) });
+      res.end("too large");
+    });
+    const home = await makeHome();
+    const memo = new MemoCook({ home });
+
+    try {
+      const badType = await memo.capture({ url: unsupported.url, title: "Unsupported type" });
+      const tooLarge = await memo.capture({ url: oversized.url, title: "Oversized type" });
+
+      expect((await memo.read(badType.id)).content).toContain("Unsupported content type");
+      expect((await memo.read(tooLarge.id)).content).toContain("Response too large");
+    } finally {
+      memo.close();
+      await unsupported.close();
+      await oversized.close();
+      if (previous === undefined) {
+        delete process.env.MEMO_COOK_ALLOW_PRIVATE_URLS;
+      } else {
+        process.env.MEMO_COOK_ALLOW_PRIVATE_URLS = previous;
+      }
+    }
+  });
+
   it("rebuilds the SQLite index from Markdown notes", async () => {
     const home = await makeHome();
     const memo = new MemoCook({ home });
@@ -140,6 +239,7 @@ describe("MemoCook", () => {
     await restored.rebuildIndex();
 
     expect(restored.search({ query: "regenerated" })[0]?.id).toBe(saved.id);
+    expect(restored.search({ query: "Rebuild fixture" })[0]?.match_reasons).toEqual(expect.arrayContaining(["gram"]));
     restored.close();
   });
 
@@ -204,5 +304,19 @@ describe("MemoCook", () => {
 
     await client.close();
     await server.close();
+  });
+
+  it("reports read-only doctor diagnostics as JSON-ready data", async () => {
+    const home = await makeHome();
+    const memo = new MemoCook({ home });
+    await memo.capture({ text: "Doctor fixture memory.", title: "Doctor fixture" });
+    memo.close();
+
+    const report = await runDoctor({ home, repoRoot: join(process.cwd()) });
+
+    expect(report.ok).toBe(true);
+    expect(report.stats.markdown_notes).toBe(1);
+    expect(report.stats.indexed_notes).toBe(1);
+    expect(report.checks.map((check) => check.name)).toEqual(expect.arrayContaining(["home exists", "index fresh"]));
   });
 });

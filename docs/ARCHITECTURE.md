@@ -26,9 +26,10 @@ This keeps the system portable and inspectable while still giving agents fast re
 ## Search Flow
 
 1. Agent calls `memo_search`.
-2. SQLite FTS ranks candidates.
-3. Scope/project/tag filters are applied.
-4. Results include traceability metadata and snippets.
+2. SQLite FTS and the lexical gram index rank candidates.
+3. Results are fused with reciprocal-rank style scoring plus title/tag/project boosts.
+4. Scope/project/tag filters are applied.
+5. Results include traceability metadata, snippets, and optional match reasons.
 
 ## Organize Flow
 
@@ -36,3 +37,7 @@ This keeps the system portable and inspectable while still giving agents fast re
 2. Memo Cook updates frontmatter.
 3. The Markdown file moves from inbox to `notes/global/` or `notes/projects/<project>/`.
 4. The index is updated.
+
+## Diagnostics
+
+`memo-cook doctor` is read-only. It checks the memory home, Markdown note count, index freshness, and packaged plugin commands, then suggests explicit repair steps such as `memo-cook reindex`.

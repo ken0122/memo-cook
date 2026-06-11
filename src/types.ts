@@ -35,6 +35,7 @@ export type NoteSearchResult = NoteFrontmatter & {
   path: string;
   snippet: string;
   score?: number;
+  match_reasons?: string[];
 };
 
 export type CaptureInput = {
