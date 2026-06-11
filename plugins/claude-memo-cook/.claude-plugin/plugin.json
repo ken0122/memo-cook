@@ -1,0 +1,12 @@
+{
+  "name": "memo-cook",
+  "version": "0.1.0",
+  "description": "Explicit, traceable, Markdown-backed memory outboard for Claude Code and other agents.",
+  "author": {
+    "name": "Memo Cook"
+  },
+  "repository": "https://github.com/local/memo-cook",
+  "license": "MIT",
+  "skills": "./skills/",
+  "mcpServers": "./.mcp.json"
+}

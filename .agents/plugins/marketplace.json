@@ -1,0 +1,20 @@
+{
+  "name": "memo-cook-local",
+  "interface": {
+    "displayName": "MemoCook Local"
+  },
+  "plugins": [
+    {
+      "name": "memo-cook",
+      "source": {
+        "source": "local",
+        "path": "./plugins/codex-memo-cook"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Productivity"
+    }
+  ]
+}

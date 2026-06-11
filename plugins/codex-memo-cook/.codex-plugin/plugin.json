@@ -1,0 +1,35 @@
+{
+  "name": "memo-cook",
+  "version": "0.1.0",
+  "description": "Explicit, traceable, Markdown-backed memory outboard for Codex and other agents.",
+  "author": {
+    "name": "MemoCook"
+  },
+  "homepage": "https://github.com/local/memo-cook",
+  "repository": "https://github.com/local/memo-cook",
+  "license": "MIT",
+  "keywords": [
+    "agent-memory",
+    "notes",
+    "mcp",
+    "markdown"
+  ],
+  "skills": "./skills/",
+  "mcpServers": "./.mcp.json",
+  "interface": {
+    "displayName": "MemoCook",
+    "shortDescription": "Save and retrieve explicit, traceable agent memories",
+    "longDescription": "MemoCook gives Codex a shared long-term memory outboard backed by Markdown notes and a rebuildable SQLite FTS index. It only writes memory when the user explicitly asks to save, remember, capture, organize, or link something.",
+    "developerName": "MemoCook",
+    "category": "Productivity",
+    "capabilities": [
+      "Read",
+      "Write"
+    ],
+    "defaultPrompt": [
+      "Search or save explicit memories with MemoCook"
+    ],
+    "brandColor": "#2F6B4F",
+    "screenshots": []
+  }
+}
