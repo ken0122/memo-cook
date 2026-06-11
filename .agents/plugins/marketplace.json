@@ -1,7 +1,7 @@
 {
   "name": "memo-cook-local",
   "interface": {
-    "displayName": "MemoCook Local"
+    "displayName": "Memo Cook Local"
   },
   "plugins": [
     {

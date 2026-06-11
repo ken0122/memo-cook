@@ -128,7 +128,13 @@ This repository ships wrapper plugins:
 - `plugins/codex-memo-cook`
 - `plugins/claude-memo-cook`
 
-Both declare the same MCP server command:
+Codex can discover the local plugin through the repo marketplace:
+
+```text
+.agents/plugins/marketplace.json
+```
+
+Each client wrapper launches the same MCP server command:
 
 ```json
 {
@@ -141,7 +147,9 @@ Both declare the same MCP server command:
 }
 ```
 
-For unpublished local development, replace that command with a globally linked `memo-cook` binary or an absolute `node dist/cli.js mcp` command.
+Codex and Claude Code use the `mcpServers` JSON wrapper in their plugin bundles and in `integrations/claude-code/mcp.json`. Hermes can use `integrations/hermes/mcp.yaml`.
+
+For unpublished local development, replace the command with a globally linked `memo-cook` binary or an absolute `node dist/cli.js mcp` command in the wrapper you are testing.
 
 Hermes and OpenClaw can use the same MCP server by adding an equivalent stdio MCP server entry.
 
